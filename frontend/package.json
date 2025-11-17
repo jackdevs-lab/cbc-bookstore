@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "css": "tailwindcss.exe -i ./src/index.css -o ./src/index.css --minify",
-    "css:watch": "tailwindcss.exe -i ./src/index.css -o ./src/index.css --watch",
-    "build": "npm run css && vite build"
+    "css": "npx tailwindcss -i ./src/index.css -o ./src/index.css --minify",
+    "css:watch": "npx tailwindcss -i ./src/index.css -o ./src/index.css --watch",
+    "build": "npm run css && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "lucide-react": "^0.553.0",
