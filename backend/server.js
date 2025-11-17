@@ -4,7 +4,12 @@ import { neon } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 
 dotenv.config();
+const { Pool } = require('pg');
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
 
@@ -135,8 +140,7 @@ app.get('/api/products', async (req, res) => {
     console.log('Values:', values);
 
     // CORRECT: Use sql.query()
-    const result = await sql.query(query, values);
-
+    const result = await pool.query(query, values);
     console.log('Query success! Products count:', result.length);
     res.json(result);
   } catch (error) {
