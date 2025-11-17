@@ -8,8 +8,10 @@ dotenv.config();
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',  // Vercel URL
+  credentials: true
+}));app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
