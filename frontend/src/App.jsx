@@ -8,7 +8,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AdminPanel from './AdminPanel';
 import './App.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://cbc-books-backend.onrender.com';
 const CBCEcommerce = () => {
   const [grades, setGrades] = useState([]);
   const [subjects, setSubjects] = useState([]);
