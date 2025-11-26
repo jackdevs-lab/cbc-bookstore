@@ -87,15 +87,13 @@ const CBCEcommerce = () => {
       console.error(err);
     } finally {
       setLoadingMore(false);
-      setLoading(reset ? false : loading);
+      setLoading(false);
     }
   }, [filters, searchQuery, hasMore]);
 
   useEffect(() => {
-    if (currentPage === 'products') {
-      fetchProducts(true);
-    } else if (currentPage === 'home') {
-      fetchProducts(true); // Load products on home too for Top Picks
+    if (currentPage === 'products' || currentPage === 'home') {
+      fetchProducts(currentPage === 'products');
     }
   }, [currentPage, filters, searchQuery, fetchProducts]);
 
@@ -129,7 +127,7 @@ const CBCEcommerce = () => {
   };
 
   const handleCheckout = async () => {
-    if (!checkoutData.name || !checkoutData.phone) return alert('Fill name and phone');
+    if (!checkoutData.name || !checkoutData.phone) return alert('Please fill name and phone');
     try {
       const res = await fetch(`${API_URL}/api/checkout/mpesa`, {
         method: 'POST',
@@ -150,7 +148,7 @@ const CBCEcommerce = () => {
         setCart([]);
         setCurrentPage('home');
       } else {
-        alert('Payment failed');
+        alert('Payment failed: ' + (data.error || 'Try again'));
       }
     } catch {
       alert('Network error');
@@ -179,20 +177,20 @@ const CBCEcommerce = () => {
     }
   };
 
-  const goToAll = () => {
+  const goToAllProducts = () => {
     setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' });
     setSearchQuery('');
     setCurrentPage('products');
   };
 
-  const goToGrade = (id) => {
-    setFilters({ grades: [id], subjects: [], categories: [], sortBy: 'recent' });
+  const goToGrade = (gradeId) => {
+    setFilters({ grades: [gradeId], subjects: [], categories: [], sortBy: 'recent' });
     setSearchQuery('');
     setCurrentPage('products');
   };
 
-  const goToCategory = (id) => {
-    setFilters({ grades: [], subjects: [], categories: [id], sortBy: 'recent' });
+  const goToCategory = (categoryId) => {
+    setFilters({ grades: [], subjects: [], categories: [categoryId], sortBy: 'recent' });
     setSearchQuery('');
     setCurrentPage('products');
   };
@@ -251,10 +249,9 @@ const CBCEcommerce = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Search books, ISBN..."
+              placeholder="Search books, ISBN, publisher..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && goToAll()}
               className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:outline-none"
             />
           </div>
@@ -275,7 +272,7 @@ const CBCEcommerce = () => {
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold">Top Picks</h2>
-            <button onClick={goToAll} className="text-blue-600 text-sm font-medium">View All</button>
+            <button onClick={goToAllProducts} className="text-blue-600 text-sm font-medium">View All</button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {products.slice(0, 4).map(p => <ProductCard key={p.id} product={p} />)}
@@ -299,7 +296,7 @@ const CBCEcommerce = () => {
     <div className="pb-20">
       <div className="max-w-7xl mx-auto px-4 py-4">
         <button onClick={() => setShowFilters(!showFilters)} className="w-full mb-4 p-3 bg-white border-2 border-gray-200 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-2"><Filter size={20} /><span className="font-medium">Filters & Sort</span></div>
+          <div className="flex items-center gap-2"><Filter size={20} /><span className="font-medium">Filters</span></div>
           {showFilters ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
         </button>
 
@@ -309,7 +306,7 @@ const CBCEcommerce = () => {
               <h3 className="font-semibold mb-2">Grade</h3>
               <div className="flex flex-wrap gap-2">
                 {grades.map(g => (
-                  <button key={g.id} onClick={() => toggleFilter('grades', g.id)} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
+                  <button key={g.id} onClick={() => toggleFilter('grades', g.id)} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700'}`}>
                     {g.name}
                   </button>
                 ))}
@@ -323,7 +320,9 @@ const CBCEcommerce = () => {
                 <option value="price_high">Price: High to Low</option>
               </select>
             </div>
-            <button onClick={goToAll} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">Clear Filters</button>
+            <button onClick={goToAllProducts} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">
+              Clear All Filters
+            </button>
           </div>
         )}
 
@@ -349,100 +348,136 @@ const CBCEcommerce = () => {
 
         {loadingMore && <div className="text-center py-4">Loading more...</div>}
         {!hasMore && products.length > 0 && <div className="text-center py-4 text-gray-500">No more products</div>}
-        {products.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
+        {products.length === 0 && !loading && (
+          <div className="text-center py-12 text-gray-500">
+            <p>No products found.</p>
+            <button onClick={goToAllProducts} className="text-blue-600 underline mt-2">Clear filters</button>
+          </div>
+        )}
       </div>
     </div>
   );
 
-  const DetailsPage = () => selectedProduct && (
-    <div className="pb-20">
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-          <img src={selectedProduct.image} alt={selectedProduct.title} className="w-full h-96 object-cover" />
-          <div className="p-6">
-            <h1 className="text-2xl font-bold mb-2">{selectedProduct.title}</h1>
-            <p className="text-gray-600 mb-4">{selectedProduct.description || 'High-quality CBC textbook'}</p>
-            <div className="flex items-center gap-4 text-sm text-gray-500 mb-6">
-              <span>{grades.find(g => g.id === selectedProduct.grade_id)?.name}</span>
-              <span>•</span>
-              <span>{subjects.find(s => s.id === selectedProduct.subject_id)?.name}</span>
-              <span>•</span>
-              <span>Stock: {selectedProduct.stock}</span>
+  const DetailsPage = () => {
+    if (!selectedProduct) return null;
+    const gradeName = grades.find(g => g.id === selectedProduct.grade_id)?.name || 'Unknown';
+    const subjectName = subjects.find(s => s.id === selectedProduct.subject_id)?.name || 'Unknown';
+    const categoryName = categories.find(c => c.id === selectedProduct.category_id)?.name || 'Unknown';
+
+    return (
+      <div className="pb-20">
+        <div className="max-w-7xl mx-auto">
+          <div className="aspect-square bg-gray-100">
+            <img src={selectedProduct.image} alt={selectedProduct.title} className="w-full h-full object-cover" />
+          </div>
+          <div className="p-4">
+            <div className="mb-4">
+              <div className="text-sm text-gray-500 mb-2">{gradeName} • {subjectName}</div>
+              <h1 className="text-2xl font-bold mb-2">{selectedProduct.title}</h1>
+              <div className="text-3xl font-bold text-blue-600 mb-4">KSh {selectedProduct.price}</div>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-3xl font-bold text-blue-600">KSh {selectedProduct.price}</span>
-              <button onClick={() => addToCart(selectedProduct)} className="px-8 py-4 bg-blue-600 text-white text-lg rounded-xl hover:bg-blue-700">
-                Add to Cart
-              </button>
+            <div className="mb-6 space-y-2 text-sm">
+              <div><span className="font-semibold">Publisher:</span> {selectedProduct.publisher}</div>
+              <div><span className="font-semibold">ISBN:</span> {selectedProduct.isbn}</div>
+              <div><span className="font-semibold">Category:</span> {categoryName}</div>
+              <div><span className="font-semibold">Stock:</span> {selectedProduct.stock} available</div>
             </div>
+            <div className="mb-6">
+              <h2 className="font-semibold mb-2">Description</h2>
+              <p className="text-gray-600 text-sm">{selectedProduct.description || 'No description available.'}</p>
+            </div>
+            <button onClick={() => { addToCart(selectedProduct); setShowCart(true); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
+              Add to Cart
+            </button>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const CartModal = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end">
-      <div className="bg-white w-full max-h-96 rounded-t-3xl overflow-y-auto">
-        <div className="p-4 border-b flex justify-between items-center">
-          <h2 className="text-xl font-bold">Your Cart ({cartCount})</h2>
-          <button onClick={() => setShowCart(false)}><X size={24} /></button>
-        </div>
-        <div className="p-4 space-y-4">
-          {cart.map(item => (
-            <div key={item.id} className="flex gap-4 bg-gray-50 p-4 rounded-xl">
-              <img src={item.image} alt={item.title} className="w-20 h-28 object-cover rounded" />
-              <div className="flex-1">
-                <h3 className="font-semibold">{item.title}</h3>
-                <p className="text-blue-600 font-bold">KSh {item.price}</p>
-                <div className="flex items-center gap-3 mt-2">
-                  <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center"><Minus size={16} /></button>
-                  <span className="font-bold">{item.quantity}</span>
-                  <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center"><Plus size={16} /></button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="p-4 border-t">
-          <div className="flex justify-between text-xl font-bold mb-4">
-            <span>Total</span>
-            <span>KSh {cartTotal}</span>
+    <div className={`fixed inset-0 z-50 transition-all duration-300 ${showCart ? 'visible' : 'invisible'}`}>
+      <div className={`absolute inset-0 bg-black transition-opacity duration-300 ${showCart ? 'opacity-50' : 'opacity-0'}`} onClick={() => setShowCart(false)} />
+      <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ${showCart ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">Your Cart ({cartCount})</h2>
+            <button onClick={() => setShowCart(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X size={24} /></button>
           </div>
-          <button onClick={() => { setShowCart(false); setCurrentPage('checkout'); }} className="w-full py-4 bg-blue-600 text-white rounded-xl text-lg font-bold">
-            Checkout
-          </button>
+          <div className="max-h-[50vh] overflow-y-auto mb-4 space-y-3">
+            {cart.map(item => (
+              <div key={item.id} className="flex gap-3 p-3 bg-gray-50 rounded-xl">
+                <img src={item.image} alt={item.title} className="w-16 h-20 object-cover rounded-lg" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-sm mb-1">{item.title}</h3>
+                  <div className="text-sm text-gray-600 mb-2">KSh {item.price}</div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => updateQuantity(item.id, -1)} className="p-1 bg-white border rounded-lg"><Minus size={16} /></button>
+                    <span className="w-8 text-center font-medium">{item.quantity}</span>
+                    <button onClick={() => updateQuantity(item.id, 1)} className="p-1 bg-white border rounded-lg"><Plus size={16} /></button>
+                  </div>
+                </div>
+                <div className="text-right font-bold">KSh {item.price * item.quantity}</div>
+              </div>
+            ))}
+          </div>
+          {cart.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">Your cart is empty</div>
+          ) : (
+            <div className="border-t pt-4">
+              <div className="flex justify-between text-lg font-bold mb-4">
+                <span>Total</span>
+                <span className="text-blue-600">KSh {cartTotal}</span>
+              </div>
+              <button onClick={() => { setShowCart(false); setCurrentPage('checkout'); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
+                Checkout with M-Pesa
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 
   const CheckoutPage = () => (
-    <div className="pb-20">
-      <div className="max-w-2xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6">Checkout</h1>
-        <div className="bg-white rounded-2xl p-6 space-y-6">
-          <input type="text" placeholder="Full Name" value={checkoutData.name} onChange={e => setCheckoutData(prev => ({ ...prev, name: e.target.value }))} className="w-full p-4 border rounded-xl" />
-          <input type="text" placeholder="Phone Number" value={checkoutData.phone} onChange={e => setCheckoutData(prev => ({ ...prev, phone: e.target.value }))} className="w-full p-4 border rounded-xl" />
-          <input type="text" placeholder="Location (e.g. Nairobi CBD)" value={checkoutData.location} onChange={e => setCheckoutData(prev => ({ ...prev, location: e.target.value }))} className="w-full p-4 border rounded-xl" />
-          <select value={checkoutData.deliveryOption} onChange={e => setCheckoutData(prev => ({ ...prev, deliveryOption: e.target.value }))} className="w-full p-4 border rounded-xl">
-            <option value="pickup">Pickup (Free)</option>
-            <option value="delivery">Delivery (+KSh 200)</option>
-          </select>
-          <button onClick={handleCheckout} className="w-full py-5 bg-green-600 text-white text-xl font-bold rounded-xl">
-            Pay KSh {cartTotal + (checkoutData.deliveryOption === 'delivery' ? 200 : 0)} via M-Pesa
-          </button>
+    <div className="max-w-xl mx-auto px-4 py-6 pb-20">
+      <h2 className="text-2xl font-bold mb-6">Checkout</h2>
+      <div className="bg-white rounded-2xl shadow-md p-4 mb-4">
+        <h3 className="font-semibold mb-3">Order Summary</h3>
+        {cart.map(item => (
+          <div key={item.id} className="flex justify-between text-sm mb-2">
+            <span>{item.title} x{item.quantity}</span>
+            <span>KSh {item.price * item.quantity}</span>
+          </div>
+        ))}
+        <div className="border-t mt-3 pt-3 flex justify-between font-bold">
+          <span>Total</span>
+          <span className="text-blue-600">KSh {cartTotal}</span>
         </div>
       </div>
+      <div className="bg-white rounded-2xl shadow-md p-4 mb-4 space-y-4">
+        <input placeholder="Full Name *" value={checkoutData.name} onChange={e => setCheckoutData({ ...checkoutData, name: e.target.value })} className="w-full p-3 border rounded-xl" />
+        <input placeholder="Phone Number (M-Pesa) *" value={checkoutData.phone} onChange={e => setCheckoutData({ ...checkoutData, phone: e.target.value })} className="w-full p-3 border rounded-xl" />
+        <input placeholder="Location (for delivery)" value={checkoutData.location} onChange={e => setCheckoutData({ ...checkoutData, location: e.target.value })} className="w-full p-3 border rounded-xl" />
+        <select value={checkoutData.deliveryOption} onChange={e => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value })} className="w-full p-3 border rounded-xl">
+          <option value="pickup">Pickup (Free)</option>
+          <option value="delivery">Home Delivery (+KSh 200)</option>
+        </select>
+      </div>
+      <button onClick={handleCheckout} className="w-full p-4 bg-green-600 text-white rounded-2xl font-semibold hover:bg-green-700 flex items-center justify-center gap-2">
+        Complete Payment (KSh {cartTotal + (checkoutData.deliveryOption === 'delivery' ? 200 : 0)})
+      </button>
     </div>
   );
 
   const SuccessPage = () => (
-    <div className="flex flex-col items-center justify-center h-screen text-center px-6">
-      <Check size={80} className="text-green-600 mb-6" />
-      <h1 className="text-3xl font-bold mb-4">Order Placed Successfully!</h1>
-      <p className="text-gray-600 text-lg">Check your phone for M-Pesa STK push</p>
-      <button onClick={() => { setOrderSuccess(false); setCurrentPage('home'); }} className="mt-8 px-8 py-4 bg-blue-600 text-white rounded-xl">
+    <div className="max-w-xl mx-auto px-4 py-12 text-center">
+      <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <Check size={40} className="text-green-600" />
+      </div>
+      <h2 className="text-2xl font-bold mb-2">Order Successful!</h2>
+      <p className="text-gray-600 mb-8">STK Push sent to your phone</p>
+      <button onClick={() => { setOrderSuccess(false); setCheckoutData({ name: '', phone: '', location: '', deliveryOption: 'pickup' }); setCurrentPage('home'); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
         Continue Shopping
       </button>
     </div>
@@ -451,7 +486,7 @@ const CBCEcommerce = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {loading && products.length === 0 ? (
-        <div className="flex items-center justify-center h-screen text-xl">Loading...</div>
+        <div className="flex items-center justify-center h-screen text-xl">Loading CBC Books...</div>
       ) : (
         <>
           <Header />
@@ -463,7 +498,7 @@ const CBCEcommerce = () => {
               {currentPage === 'checkout' && <CheckoutPage />}
             </>
           )}
-          {showCart && <CartModal />}
+          <CartModal />
           {!showCart && cartCount > 0 && currentPage !== 'checkout' && (
             <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30">
               <ShoppingCart size={24} />
