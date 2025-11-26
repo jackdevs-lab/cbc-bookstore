@@ -77,83 +77,42 @@ app.get('/api/products/:id', async (req, res) => {
 
 app.get('/api/products', async (req, res) => {
   try {
-    const {
-      grade_ids,
-      subject_ids,
-      category_ids,
-      search,
-      sort = 'recent',
-      page = 1,
-      limit = 20
-    } = req.query;
-
+    const { page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
-    // Build WHERE conditions safely (no dynamic param count)
-    let where = [];
-    let params = [];
+    console.log('Fetching products →', { page, limit, offset });
 
-    if (grade_ids) {
-      const ids = grade_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length > 0) {
-        where.push(`p.grade_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
-        params.push(...ids);
-      }
-    }
-    if (subject_ids) {
-      const ids = subject_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length > 0) {
-        where.push(`p.subject_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
-        params.push(...ids);
-      }
-    }
-    if (category_ids) {
-      const ids = category_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length > 0) {
-        where.push(`p.category_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
-        params.push(...ids);
-      }
-    }
-    if (search) {
-      params.push(`%${search}%`);
-      where.push(`(p.title ILIKE $${params.length} OR p.isbn ILIKE $${params.length} OR p.publisher ILIKE $${params.length})`);
-    }
-
-    const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-
-    // Sort
-    let orderBy = 'ORDER BY p.id DESC';
-    if (sort === 'price_low') orderBy = 'ORDER BY p.price ASC';
-    if (sort === 'price_high') orderBy = 'ORDER BY p.price DESC';
-
-    // Final query — fixed param order
-    const finalQuery = `
-      SELECT p.*, g.name as grade_name, s.name as subject_name, c.name as category_name
+    // SUPER SIMPLE QUERY — no filters, no joins that can break
+    const query = `
+      SELECT 
+        p.id, p.title, p.price, p.image, p.stock, p.publisher, p.isbn,
+        p.grade_id, g.name as grade_name,
+        p.subject_id, s.name as subject_name,
+        p.category_id, c.name as category_name
       FROM products p
       LEFT JOIN grades g ON p.grade_id = g.id
       LEFT JOIN subjects s ON p.subject_id = s.id
       LEFT JOIN categories c ON p.category_id = c.id
-      ${whereClause}
-      ${orderBy}
-      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+      ORDER BY p.id DESC
+      LIMIT $1 OFFSET $2
     `;
 
-    params.push(Number(limit), offset);
+    const result = await sql(query, Number(limit), offset);
 
-    const result = await sql(finalQuery, ...params);
+    console.log(`Success! Found ${result.length} products`);
 
-    // Cloudinary thumbnails — instant loading
-    const products = result.map(row => ({
-      ...row,
-      image: row.image
-        ? `https://res.cloudinary.com/dbxb5wlnf/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${row.image.split('/').pop()}`
-        : 'https://via.placeholder.com/400x600.png?text=No+Image'
+    // Cloudinary magic — tiny fast images
+    const products = result.map(p => ({
+      ...p,
+      image: p.image
+        ? `https://res.cloudinary.com/dbxb5wlnf/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${p.image.split('/').pop()}`
+        : 'https://res.cloudinary.com/demo/image/upload/w_400,h_600,c_fill,q_auto/sample.jpg'
     }));
 
     res.json(products);
   } catch (error) {
-    console.error('Products error:', error.message);
-    res.json([]); // Never crash frontend
+    console.error('PRODUCTS ERROR:', error.message);
+    res.json([]); // Never crash
   }
 });
 app.put('/api/products/:id', async (req, res) => {
