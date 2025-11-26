@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, Search, X, ChevronDown, ChevronUp, Filter,
-  ArrowLeft, Plus, Minus, Check
+  ArrowLeft, Plus, Minus, Check, Package, MapPin, Phone
 } from 'lucide-react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AdminPanel from './AdminPanel';
@@ -13,10 +13,12 @@ const CBCEcommerce = () => {
   const [grades, setGrades] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+
   const [currentPage, setCurrentPage] = useState('home');
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
@@ -57,57 +59,57 @@ const CBCEcommerce = () => {
     fetchStaticData();
   }, []);
 
-  const fetchProducts = useCallback(async (reset = false) => {
-    if (reset) {
-      pageRef.current = 1;
-      setProducts([]);
-      setHasMore(true);
-    }
-    if (!hasMore && !reset) return;
-
+  const loadAllProducts = async () => {
     try {
-      setLoadingMore(!reset);
-      const params = new URLSearchParams();
-      if (filters.grades.length) params.append('grade_ids', filters.grades.join(','));
-      if (filters.subjects.length) params.append('subject_ids', filters.subjects.join(','));
-      if (filters.categories.length) params.append('category_ids', filters.categories.join(','));
-      if (searchQuery) params.append('search', searchQuery);
-      if (filters.sortBy !== 'recent') params.append('sort', filters.sortBy);
-      params.append('page', pageRef.current);
-      params.append('limit', 20);
-
-      const res = await fetch(`${API_URL}/api/products?${params}`);
-      const newProducts = await res.json();
-
-      setProducts(prev => reset ? newProducts : [...prev, ...newProducts]);
-      setHasMore(newProducts.length === 20);
-      pageRef.current += 1;
+      const res = await fetch(`${API_URL}/api/products?limit=200`);
+      const data = await res.json();
+      setAllProducts(data);
+      setFilteredProducts(data);
+      setLoading(false);
     } catch (err) {
-      console.error('Fetch products error:', err);
-    } finally {
-      setLoadingMore(false);
+      console.error(err);
       setLoading(false);
     }
-  }, [filters, searchQuery, hasMore]);
+  };
 
   useEffect(() => {
-    if (currentPage === 'products') {
-      fetchProducts(true);
-    } else if (currentPage === 'home') {
-      setLoading(false);
+    loadAllProducts();
+  }, []);
+
+  useEffect(() => {
+    let filtered = allProducts;
+
+    if (filters.grades.length > 0) {
+      filtered = filtered.filter(p => filters.grades.includes(p.grade_id));
     }
-  }, [currentPage, filters, searchQuery, fetchProducts]);
+    if (filters.categories.length > 0) {
+      filtered = filtered.filter(p => filters.categories.includes(p.category_id));
+    }
+    if (searchQuery) {
+      filtered = filtered.filter(p =>
+        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.isbn.includes(searchQuery)
+      );
+    }
+
+    if (filters.sortBy === 'price_low') filtered.sort((a, b) => a.price - b.price);
+    if (filters.sortBy === 'price_high') filtered.sort((a, b) => b.price - a.price);
+
+    setFilteredProducts(filtered);
+    setHasMore(filtered.length > 20);
+  }, [filters, searchQuery, allProducts]);
 
   const lastProductRef = useCallback(node => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || filteredProducts.length <= 20) return;
     if (observer.current) observer.current.disconnect();
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        fetchProducts();
+      if (entries[0].isIntersecting && hasMore) {
+        setLoadingMore(true);
+        setTimeout(() => setLoadingMore(false), 500);
       }
     });
     if (node) observer.current.observe(node);
-  }, [loadingMore, hasMore, fetchProducts]);
+  }, [loadingMore, hasMore, filteredProducts.length]);
 
   const cartTotal = cart.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
@@ -158,28 +160,6 @@ const CBCEcommerce = () => {
     }
   };
 
-  const toggleFilter = (type, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [type]: prev[type].includes(value)
-        ? prev[type].filter(v => v !== value)
-        : [...prev[type], value]
-    }));
-  };
-
-  const fetchProduct = async (id) => {
-    try {
-      const res = await fetch(`${API_URL}/api/products/${id}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setSelectedProduct(data);
-      setCurrentPage('details');
-    } catch {
-      alert('Product not found');
-      setCurrentPage('home');
-    }
-  };
-
   const goToAll = () => {
     setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' });
     setSearchQuery('');
@@ -196,6 +176,19 @@ const CBCEcommerce = () => {
     setFilters({ grades: [], subjects: [], categories: [id], sortBy: 'recent' });
     setSearchQuery('');
     setCurrentPage('products');
+  };
+
+  const fetchProduct = async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/api/products/${id}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setSelectedProduct(data);
+      setCurrentPage('details');
+    } catch {
+      alert('Product not found');
+      setCurrentPage('home');
+    }
   };
 
   const Header = () => (
@@ -235,7 +228,7 @@ const CBCEcommerce = () => {
           <h3 className="font-semibold text-sm mb-2 line-clamp-2">{product.title}</h3>
           <div className="flex justify-between items-center">
             <span className="text-lg font-bold text-blue-600">KSh {product.price}</span>
-            <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+            <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="p-2 bg-blue-500 text- white rounded-lg hover:bg-blue-600">
               <Plus size={16} />
             </button>
           </div>
@@ -276,7 +269,14 @@ const CBCEcommerce = () => {
         <div className="mb-8">
           <h2 className="text-lg font-bold mb-4">Top Picks</h2>
           <div className="grid grid-cols-2 gap-3">
-            {products.slice(0, 8).map(p => <ProductCard эпохkey={p.id} product={p} />)}
+            {allProducts.slice(0, 8).map(p => <ProductCard key={p.id} product={p} />)}
+          </div>
+        </div>
+
+        <div className="mb-8">
+          <h2 className="text-lg font-bold mb-4">Learning Supplies</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {allProducts.filter(p => p.category_id === 5).slice(0, 6).map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </div>
       </div>
@@ -297,7 +297,12 @@ const CBCEcommerce = () => {
               <h3 className="font-semibold mb-2">Grade</h3>
               <div className="flex flex-wrap gap-2">
                 {grades.map(g => (
-                  <button key={g.id} onClick={() => toggleFilter('grades', g.id)} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
+                  <button key={g.id} onClick={() => setFilters(prev => ({
+                    ...prev,
+                    grades: prev.grades.includes(g.id)
+                      ? prev.grades.filter(v => v !== g.id)
+                      : [...prev.grades, g.id]
+                  }))} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
                     {g.name}
                   </button>
                 ))}
@@ -311,49 +316,123 @@ const CBCEcommerce = () => {
                 <option value="price_high">Price: High to Low</option>
               </select>
             </div>
-            <button onClick={goToAll} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">Clear Filters</button>
+            <button onClick={() => setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' })} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">Clear Filters</button>
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          {products.map((product, i) => (
+          {filteredProducts.slice(0, 60).map((product, i) => (
             <ProductCard
               key={product.id}
               product={product}
-              ref={i === products.length - 1 ? lastProductRef : null}
+              ref={i === filteredProducts.length - 1 ? lastProductRef : null}
             />
           ))}
         </div>
 
-        {loading && products.length === 0 && (
-          <div className="grid grid-cols-2 gap-3">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="bg-gray-200 rounded-2xl animate-pulse">
-                <div className="aspect-[3/4]" />
-                <div className="p-3 space-y-2">
-                  <div className="h-4 bg-gray-300 rounded w-20" />
-                  <div className="h-6 bg-gray-300 rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {loadingMore && <div className="text-center py-6">Loading more...</div>}
-        {!hasMore && products.length > 0 && <div className="text-center py-6 text-gray-500">No more products</div>}
-        {products.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
+        {loading && <div className="text-center py-12">Loading products...</div>}
+        {filteredProducts.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
       </div>
     </div>
   );
 
-  const DetailsPage = () => <div>Details Page</div>;
-  const CartModal = () => <div>Cart Modal</div>;
-  const CheckoutPage = () => <div>Checkout Page</div>;
-  const SuccessPage = () => <div>Order Success!</div>;
+  const DetailsPage = () => selectedProduct && (
+    <div className="pb-20">
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <img src={selectedProduct.image} alt={selectedProduct.title} className="w-full h-96 object-cover" />
+          <div className="p-6">
+            <h1 className="text-2xl font-bold mb-2">{selectedProduct.title}</h1>
+            <p className="text-gray-600 mb-4">{selectedProduct.description || 'No description available'}</p>
+            <div className="flex items-center gap-4 text-sm text-gray-500 mb-6">
+              <span>{grades.find(g => g.id === selectedProduct.grade_id)?.name}</span>
+              <span>•</span>
+              <span>{subjects.find(s => s.id === selectedProduct.subject_id)?.name}</span>
+              <span>•</span>
+              <span>In stock: {selectedProduct.stock}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-3xl font-bold text-blue-600">KSh {selectedProduct.price}</span>
+              <button onClick={() => addToCart(selectedProduct)} className="px-8 py-4 bg-blue-600 text-white text-lg rounded-xl hover:bg-blue-700">
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const CartModal = () => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end">
+      <div className="bg-white w-full max-h-96 rounded-t-3xl overflow-y-auto">
+        <div className="p-4 border-b flex justify-between items-center">
+          <h2 className="text-xl font-bold">Your Cart ({cartCount})</h2>
+          <button onClick={() => setShowCart(false)}><X size={24} /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          {cart.map(item => (
+            <div key={item.id} className="flex gap-4 bg-gray-50 p-4 rounded-xl">
+              <img src={item.image} alt={item.title} className="w-20 h-28 object-cover rounded" />
+              <div className="flex-1">
+                <h3 className="font-semibold">{item.title}</h3>
+                <p className="text-blue-600 font-bold">KSh {item.price}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center"><Minus size={16} /></button>
+                  <span className="font-bold">{item.quantity}</span>
+                  <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center"><Plus size={16} /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 border-t">
+          <div className="flex justify-between text-xl font-bold mb-4">
+            <span>Total</span>
+            <span>KSh {cartTotal}</span>
+          </div>
+          <button onClick={() => { setShowCart(false); setCurrentPage('checkout'); }} className="w-full py-4 bg-blue-600 text-white rounded-xl text-lg font-bold">
+            Checkout
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const CheckoutPage = () => (
+    <div className="pb-20">
+      <div className="max-w-2xl mx-auto px-4 py-6">
+        <h1 className="text-2xl font-bold mb-6">Checkout</h1>
+        <div className="bg-white rounded-2xl p-6 space-y-6">
+          <input type="text" placeholder="Full Name" value={checkoutData.name} onChange={e => setCheckoutData(prev => ({ ...prev, name: e.target.value }))} className="w-full p-4 border rounded-xl" />
+          <input type="text" placeholder="Phone Number" value={checkoutData.phone} onChange={e => setCheckoutData(prev => ({ ...prev, phone: e.target.value }))} className="w-full p-4 border rounded-xl" />
+          <input type="text" placeholder="Location (e.g. Nairobi CBD)" value={checkoutData.location} onChange={e => setCheckoutData(prev => ({ ...prev, location: e.target.value }))} className="w-full p-4 border rounded-xl" />
+          <select value={checkoutData.deliveryOption} onChange={e => setCheckoutData(prev => ({ ...prev, deliveryOption: e.target.value }))} className="w-full p-4 border rounded-xl">
+            <option value="pickup">Pickup (Free)</option>
+            <option value="delivery">Delivery (+KSh 200)</option>
+          </select>
+          <button onClick={handleCheckout} className="w-full py-5 bg-green-600 text-white text-xl font-bold rounded-xl">
+            Pay KSh {cartTotal + (checkoutData.deliveryOption === 'delivery' ? 200 : 0)} via M-Pesa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const SuccessPage = () => (
+    <div className="flex flex-col items-center justify-center h-screen text-center px-6">
+      <Check size={80} className="text-green-600 mb-6" />
+      <h1 className="text-3xl font-bold mb-4">Order Placed Successfully!</h1>
+      <p className="text-gray-600 text-lg">Check your phone for M-Pesa STK push</p>
+      <button onClick={() => { setOrderSuccess(false); setCurrentPage('home'); }} className="mt-8 px-8 py-4 bg-blue-600 text-white rounded-xl">
+        Continue Shopping
+      </button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {loading && products.length === 0 && currentPage !== 'home' ? (
+      {loading ? (
         <div className="flex items-center justify-center h-screen text-xl">Loading...</div>
       ) : (
         <>
@@ -362,15 +441,15 @@ const CBCEcommerce = () => {
             <>
               {currentPage === 'home' && <HomePage />}
               {currentPage === 'products' && <ProductsPage />}
-              {currentPage === 'details' && selectedProduct && <DetailsPage />}
+              {currentPage === 'details' && <DetailsPage />}
               {currentPage === 'checkout' && <CheckoutPage />}
             </>
           )}
           {showCart && <CartModal />}
           {!showCart && cartCount > 0 && currentPage !== 'checkout' && (
-            <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30">
-              <ShoppingCart size={24} />
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-600 text-white p-4 rounded-full shadow-2xl z-30">
+              <ShoppingCart size={28} />
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
                 {cartCount}
               </span>
             </button>
