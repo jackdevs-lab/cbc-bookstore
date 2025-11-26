@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, Search, X, ChevronDown, ChevronUp, Filter,
@@ -18,15 +17,15 @@ const CBCEcommerce = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-
   const [currentPage, setCurrentPage] = useState('home');
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [orderSuccess, setOrderSuccess] = useState(false);
 
-  const [filters, setFiltersFilters] = useState({
+  const [filters, setFilters] = useState({
     grades: [],
     subjects: [],
     categories: [],
@@ -36,12 +35,10 @@ const CBCEcommerce = () => {
   const [checkoutData, setCheckoutData] = useState({
     name: '', phone: '', location: '', deliveryOption: 'pickup'
   });
-  const [orderSuccess, setOrderSuccess] = useState(false);
 
-  const page = useRef(1);
+  const pageRef = useRef(1);
   const observer = useRef();
 
-  // Fetch grades, subjects, categories once
   useEffect(() => {
     const fetchStaticData = async () => {
       try {
@@ -50,24 +47,22 @@ const CBCEcommerce = () => {
           fetch(`${API_URL}/api/subjects`).then(r => r.json()),
           fetch(`${API_URL}/api/categories`).then(r => r.json())
         ]);
-        setGrades(g);
-        setSubjects(s);
-        setCategories(c);
+        setGrades(g || []);
+        setSubjects(s || []);
+        setCategories(c || []);
       } catch (err) {
-        alert('Failed to load data. Check internet.');
+        console.error('Failed to load static data');
       }
     };
     fetchStaticData();
   }, []);
 
-  // Fetch products with filters, search, and pagination
   const fetchProducts = useCallback(async (reset = false) => {
     if (reset) {
-      page.current = 1;
+      pageRef.current = 1;
       setProducts([]);
       setHasMore(true);
     }
-
     if (!hasMore && !reset) return;
 
     try {
@@ -78,7 +73,7 @@ const CBCEcommerce = () => {
       if (filters.categories.length) params.append('category_ids', filters.categories.join(','));
       if (searchQuery) params.append('search', searchQuery);
       if (filters.sortBy !== 'recent') params.append('sort', filters.sortBy);
-      params.append('page', page.current);
+      params.append('page', pageRef.current);
       params.append('limit', 20);
 
       const res = await fetch(`${API_URL}/api/products?${params}`);
@@ -86,41 +81,43 @@ const CBCEcommerce = () => {
 
       setProducts(prev => reset ? newProducts : [...prev, ...newProducts]);
       setHasMore(newProducts.length === 20);
-      page.current += 1;
+      pageRef.current += 1;
     } catch (err) {
-      console.error(err);
+      console.error('Fetch products error:', err);
     } finally {
       setLoadingMore(false);
       setLoading(false);
     }
   }, [filters, searchQuery, hasMore]);
 
-  // Trigger fetch when filters/search change or on products page
   useEffect(() => {
     if (currentPage === 'products') {
-      fetchProducts(true); // reset + fetch
+      fetchProducts(true);
+    } else if (currentPage === 'home') {
+      setLoading(false);
     }
   }, [currentPage, filters, searchQuery, fetchProducts]);
 
-  // Infinite scroll observer
   const lastProductRef = useCallback(node => {
-    if (loadingMore) return;
+    if (loadingMore || !hasMore) return;
     if (observer.current) observer.current.disconnect();
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore) {
+      if (entries[0].isIntersecting) {
         fetchProducts();
       }
     });
     if (node) observer.current.observe(node);
   }, [loadingMore, hasMore, fetchProducts]);
 
-  const cartTotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const cartTotal = cart.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
 
   const addToCart = (product) => {
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id);
-      if (existing) return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
       return [...prev, { ...product, quantity: 1 }];
     });
   };
@@ -224,14 +221,14 @@ const CBCEcommerce = () => {
     </header>
   );
 
-  const ProductCard = ({ product, isLast }) => {
+  const ProductCard = React.forwardRef(({ product }, ref) => {
     const gradeName = grades.find(g => g.id === product.grade_id)?.name || 'All Grades';
     const subjectName = subjects.find(s => s.id === product.subject_id)?.name || '';
 
     return (
-      <div ref={isLast ? lastProductRef : null} onClick={() => fetchProduct(product.id)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
+      <div ref={ref} onClick={() => fetchProduct(product.id)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
         <div className="aspect-[3/4] bg-gray-100">
-          <img src={product.image || "https://via.placeholder.com/300"} alt={product.title} className="w-full h-full object-cover" loading="lazy" />
+          <img src={product.image || "https://via.placeholder.com/400x600.png?text=No+Image"} alt={product.title} className="w-full h-full object-cover" loading="lazy" />
         </div>
         <div className="p-3">
           <div className="text-xs text-gray-500 mb-1">{gradeName} • {subjectName}</div>
@@ -245,7 +242,7 @@ const CBCEcommerce = () => {
         </div>
       </div>
     );
-  };
+  });
 
   const HomePage = () => (
     <div className="pb-20">
@@ -277,22 +274,9 @@ const CBCEcommerce = () => {
         </div>
 
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold">Top Picks</h2>
-            <button onClick={goToAll} className="text-blue-600 text-sm font-medium">View All</button>
-          </div>
+          <h2 className="text-lg font-bold mb-4">Top Picks</h2>
           <div className="grid grid-cols-2 gap-3">
-            {products.slice(0, 4).map(p => <ProductCard key={p.id} product={p} />)}
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold">Learning Supplies</h2>
-            <button onClick={() => goToCategory(5)} className="text-blue-600 text-sm font-medium">View All</button>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {products.filter(p => p.category_id === 5).slice(0, 4).map(p => <ProductCard key={p.id} product={p} />)}
+            {products.slice(0, 8).map(p => <ProductCard эпохkey={p.id} product={p} />)}
           </div>
         </div>
       </div>
@@ -333,7 +317,11 @@ const CBCEcommerce = () => {
 
         <div className="grid grid-cols-2 gap-3">
           {products.map((product, i) => (
-            <ProductCard key={product.id} product={product} isLast={i === products.length - 1} />
+            <ProductCard
+              key={product.id}
+              product={product}
+              ref={i === products.length - 1 ? lastProductRef : null}
+            />
           ))}
         </div>
 
@@ -351,24 +339,21 @@ const CBCEcommerce = () => {
           </div>
         )}
 
-        {loadingMore && <div className="text-center py-4">Loading more...</div>}
-        {!hasMore && products.length > 0 && <div className="text-center py-4 text-gray-500">No more products</div>}
+        {loadingMore && <div className="text-center py-6">Loading more...</div>}
+        {!hasMore && products.length > 0 && <div className="text-center py-6 text-gray-500">No more products</div>}
         {products.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
       </div>
     </div>
   );
 
-  // DetailsPage, CartModal, CheckoutPage, SuccessPage (same as before)
-  // ... (keep your existing ones - they work perfectly)
-
-  const DetailsPage = () => { /* your existing DetailsPage */ };
-  const CartModal = () => { /* your existing CartModal */ };
-  const CheckoutPage = () => { /* your existing CheckoutPage */ };
-  const SuccessPage = () => { /* your existing SuccessPage */ };
+  const DetailsPage = () => <div>Details Page</div>;
+  const CartModal = () => <div>Cart Modal</div>;
+  const CheckoutPage = () => <div>Checkout Page</div>;
+  const SuccessPage = () => <div>Order Success!</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {loading && products.length === 0 ? (
+      {loading && products.length === 0 && currentPage !== 'home' ? (
         <div className="flex items-center justify-center h-screen text-xl">Loading...</div>
       ) : (
         <>
@@ -381,7 +366,7 @@ const CBCEcommerce = () => {
               {currentPage === 'checkout' && <CheckoutPage />}
             </>
           )}
-          <CartModal />
+          {showCart && <CartModal />}
           {!showCart && cartCount > 0 && currentPage !== 'checkout' && (
             <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30">
               <ShoppingCart size={24} />
