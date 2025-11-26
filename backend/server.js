@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import { Pool } from 'pg';
 
 dotenv.config();
-
+const CLOUDINARY_CLOUD_NAME = 'dbxb5wlnf';
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
 
@@ -78,15 +78,9 @@ app.get('/api/products/:id', async (req, res) => {
 app.get('/api/products', async (req, res) => {
   try {
     const {
-      grade_ids,
-      subject_ids,
-      category_ids,
-      min_price,
-      max_price,
-      sort = 'recent',
-      search,
-      page = 1,
-      limit = 20
+      grade_ids, subject_ids, category_ids,
+      min_price, max_price, sort = 'recent',
+      search, page = 1, limit = 20
     } = req.query;
 
     let query = `
@@ -99,45 +93,34 @@ app.get('/api/products', async (req, res) => {
     `;
     const params = [];
 
-    if (grade_ids) {
-      const ids = grade_ids.split(',').map(Number);
-      query += ` AND p.grade_id = ANY($${params.length + 1})`;
-      params.push(ids);
-    }
-    if (subject_ids) {
-      const ids = subject_ids.split(',').map(Number);
-      query += ` AND p.subject_id = ANY($${params.length + 1})`;
-      params.push(ids);
-    }
-    if (category_ids) {
-      const ids = category_ids.split(',').map(Number);
-      query += ` AND p.category_id = ANY($${params.length + 1})`;
-      params.push(ids);
-    }
-    if (min_price) {
-      query += ` AND p.price >= $${params.length + 1}`;
-      params.push(Number(min_price));
-    }
-    if (max_price) {
-      query += ` AND p.price <= $${params.length + 1}`;
-      params.push(Number(max_price));
-    }
-    if (search) {
-      query += ` AND (p.title ILIKE $${params.length + 1} OR p.isbn ILIKE $${params.length + 1} OR p.publisher ILIKE $${params.length + 1})`;
-      params.push(`%${search}%`);
-    }
+    if (grade_ids)  { query += ` AND p.grade_id = ANY($${params.length + 1})`;   params.push(grade_ids.split(',').map(Number)); }
+    if (subject_ids){ query += ` AND p.subject_id = ANY($${params.length + 1})`; params.push(subject_ids.split(',').map(Number)); }
+    if (category_ids){ query += ` AND p.category_id = ANY($${params.length + 1})`; params.push(category_ids.split(',').map(Number)); }
+    if (min_price)  { query += ` AND p.price >= $${params.length + 1}`;          params.push(Number(min_price)); }
+    if (max_price)  { query += ` AND p.price <= $${params.length + 1}`;          params.push(Number(max_price)); }
+    if (search)     { query += ` AND (p.title ILIKE $${params.length + 1} OR p.isbn ILIKE $${params.length + 1} OR p.publisher ILIKE $${params.length + 1})`; 
+                      params.push(`%${search}%`); }
 
-    if (sort === 'price_low') query += ' ORDER BY p.price ASC';
+    if (sort === 'price_low')      query += ' ORDER BY p.price ASC';
     else if (sort === 'price_high') query += ' ORDER BY p.price DESC';
-    else query += ' ORDER BY p.id DESC';
+    else                            query += ' ORDER BY p.id DESC';
 
     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(Number(limit), (Number(page) - 1) * Number(limit));
 
-    const result = await sql([query, ...params]); // Neon supports this syntax
-    res.json(result);
+    const result = await sql([query, ...params]);
+
+    // THIS IS THE MAGIC → Cloudinary delivers tiny, fast, auto-optimized images
+    const products = result.map(row => ({
+      ...row,
+      image: row.image
+        ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${row.image.split('/').pop()}`
+        : 'https://via.placeholder.com/400x600.png?text=No+Image'
+    }));
+
+    res.json(products);
   } catch (error) {
-    console.error(error);
+    console.error('Products error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
