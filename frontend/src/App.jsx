@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, Search, X, ChevronDown, ChevronUp, Filter,
-  ArrowLeft, Plus, Minus, Check, Package, MapPin, Phone
+  ArrowLeft, Plus, Minus, Check
 } from 'lucide-react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AdminPanel from './AdminPanel';
@@ -13,8 +13,7 @@ const CBCEcommerce = () => {
   const [grades, setGrades] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [allProducts, setAllProducts] = useState([]);
-  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -25,7 +24,6 @@ const CBCEcommerce = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [orderSuccess, setOrderSuccess] = useState(false);
 
   const [filters, setFilters] = useState({
     grades: [],
@@ -37,8 +35,9 @@ const CBCEcommerce = () => {
   const [checkoutData, setCheckoutData] = useState({
     name: '', phone: '', location: '', deliveryOption: 'pickup'
   });
+  const [orderSuccess, setOrderSuccess] = useState(false);
 
-  const pageRef = useRef(1);
+  const page = useRef(1);
   const observer = useRef();
 
   useEffect(() => {
@@ -53,63 +52,63 @@ const CBCEcommerce = () => {
         setSubjects(s || []);
         setCategories(c || []);
       } catch (err) {
-        console.error('Failed to load static data');
+        alert('Failed to load data. Check internet.');
       }
     };
     fetchStaticData();
   }, []);
 
-  const loadAllProducts = async () => {
+  const fetchProducts = useCallback(async (reset = false) => {
+    if (reset) {
+      page.current = 1;
+      setProducts([]);
+      setHasMore(true);
+    }
+    if (!hasMore && !reset) return;
+
     try {
-      const res = await fetch(`${API_URL}/api/products?limit=200`);
-      const data = await res.json();
-      setAllProducts(data);
-      setFilteredProducts(data);
-      setLoading(false);
+      setLoadingMore(!reset);
+      const params = new URLSearchParams();
+      if (filters.grades.length) params.append('grade_ids', filters.grades.join(','));
+      if (filters.subjects.length) params.append('subject_ids', filters.subjects.join(','));
+      if (filters.categories.length) params.append('category_ids', filters.categories.join(','));
+      if (searchQuery) params.append('search', searchQuery);
+      if (filters.sortBy !== 'recent') params.append('sort', filters.sortBy);
+      params.append('page', page.current);
+      params.append('limit', 20);
+
+      const res = await fetch(`${API_URL}/api/products?${params}`);
+      const newProducts = await res.json();
+
+      setProducts(prev => reset ? newProducts : [...prev, ...newProducts]);
+      setHasMore(newProducts.length === 20);
+      page.current += 1;
     } catch (err) {
       console.error(err);
-      setLoading(false);
+    } finally {
+      setLoadingMore(false);
+      setLoading(reset ? false : loading);
     }
-  };
+  }, [filters, searchQuery, hasMore]);
 
   useEffect(() => {
-    loadAllProducts();
-  }, []);
-
-  useEffect(() => {
-    let filtered = allProducts;
-
-    if (filters.grades.length > 0) {
-      filtered = filtered.filter(p => filters.grades.includes(p.grade_id));
+    if (currentPage === 'products') {
+      fetchProducts(true);
+    } else if (currentPage === 'home') {
+      fetchProducts(true); // Load products on home too for Top Picks
     }
-    if (filters.categories.length > 0) {
-      filtered = filtered.filter(p => filters.categories.includes(p.category_id));
-    }
-    if (searchQuery) {
-      filtered = filtered.filter(p =>
-        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.isbn.includes(searchQuery)
-      );
-    }
-
-    if (filters.sortBy === 'price_low') filtered.sort((a, b) => a.price - b.price);
-    if (filters.sortBy === 'price_high') filtered.sort((a, b) => b.price - a.price);
-
-    setFilteredProducts(filtered);
-    setHasMore(filtered.length > 20);
-  }, [filters, searchQuery, allProducts]);
+  }, [currentPage, filters, searchQuery, fetchProducts]);
 
   const lastProductRef = useCallback(node => {
-    if (loadingMore || filteredProducts.length <= 20) return;
+    if (loadingMore) return;
     if (observer.current) observer.current.disconnect();
     observer.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && hasMore) {
-        setLoadingMore(true);
-        setTimeout(() => setLoadingMore(false), 500);
+        fetchProducts();
       }
     });
     if (node) observer.current.observe(node);
-  }, [loadingMore, hasMore, filteredProducts.length]);
+  }, [loadingMore, hasMore, fetchProducts]);
 
   const cartTotal = cart.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
@@ -117,9 +116,7 @@ const CBCEcommerce = () => {
   const addToCart = (product) => {
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id);
-      if (existing) {
-        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
-      }
+      if (existing) return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
       return [...prev, { ...product, quantity: 1 }];
     });
   };
@@ -160,6 +157,28 @@ const CBCEcommerce = () => {
     }
   };
 
+  const toggleFilter = (type, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [type]: prev[type].includes(value)
+        ? prev[type].filter(v => v !== value)
+        : [...prev[type], value]
+    }));
+  };
+
+  const fetchProduct = async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/api/products/${id}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setSelectedProduct(data);
+      setCurrentPage('details');
+    } catch {
+      alert('Product not found');
+      setCurrentPage('home');
+    }
+  };
+
   const goToAll = () => {
     setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' });
     setSearchQuery('');
@@ -176,19 +195,6 @@ const CBCEcommerce = () => {
     setFilters({ grades: [], subjects: [], categories: [id], sortBy: 'recent' });
     setSearchQuery('');
     setCurrentPage('products');
-  };
-
-  const fetchProduct = async (id) => {
-    try {
-      const res = await fetch(`${API_URL}/api/products/${id}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setSelectedProduct(data);
-      setCurrentPage('details');
-    } catch {
-      alert('Product not found');
-      setCurrentPage('home');
-    }
   };
 
   const Header = () => (
@@ -214,28 +220,28 @@ const CBCEcommerce = () => {
     </header>
   );
 
-  const ProductCard = React.forwardRef(({ product }, ref) => {
+  const ProductCard = ({ product, isLast }) => {
     const gradeName = grades.find(g => g.id === product.grade_id)?.name || 'All Grades';
     const subjectName = subjects.find(s => s.id === product.subject_id)?.name || '';
 
     return (
-      <div ref={ref} onClick={() => fetchProduct(product.id)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
+      <div ref={isLast ? lastProductRef : null} onClick={() => fetchProduct(product.id)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
         <div className="aspect-[3/4] bg-gray-100">
-          <img src={product.image || "https://via.placeholder.com/400x600.png?text=No+Image"} alt={product.title} className="w-full h-full object-cover" loading="lazy" />
+          <img src={product.image || "https://via.placeholder.com/300"} alt={product.title} className="w-full h-full object-cover" loading="lazy" />
         </div>
         <div className="p-3">
           <div className="text-xs text-gray-500 mb-1">{gradeName} • {subjectName}</div>
           <h3 className="font-semibold text-sm mb-2 line-clamp-2">{product.title}</h3>
           <div className="flex justify-between items-center">
             <span className="text-lg font-bold text-blue-600">KSh {product.price}</span>
-            <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="p-2 bg-blue-500 text- white rounded-lg hover:bg-blue-600">
+            <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
               <Plus size={16} />
             </button>
           </div>
         </div>
       </div>
     );
-  });
+  };
 
   const HomePage = () => (
     <div className="pb-20">
@@ -267,16 +273,22 @@ const CBCEcommerce = () => {
         </div>
 
         <div className="mb-8">
-          <h2 className="text-lg font-bold mb-4">Top Picks</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold">Top Picks</h2>
+            <button onClick={goToAll} className="text-blue-600 text-sm font-medium">View All</button>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            {allProducts.slice(0, 8).map(p => <ProductCard key={p.id} product={p} />)}
+            {products.slice(0, 4).map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </div>
 
-        <div className="mb-8">
-          <h2 className="text-lg font-bold mb-4">Learning Supplies</h2>
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold">Learning Supplies</h2>
+            <button onClick={() => goToCategory(5)} className="text-blue-600 text-sm font-medium">View All</button>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            {allProducts.filter(p => p.category_id === 5).slice(0, 6).map(p => <ProductCard key={p.id} product={p} />)}
+            {products.filter(p => p.category_id === 5).slice(0, 4).map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </div>
       </div>
@@ -297,12 +309,7 @@ const CBCEcommerce = () => {
               <h3 className="font-semibold mb-2">Grade</h3>
               <div className="flex flex-wrap gap-2">
                 {grades.map(g => (
-                  <button key={g.id} onClick={() => setFilters(prev => ({
-                    ...prev,
-                    grades: prev.grades.includes(g.id)
-                      ? prev.grades.filter(v => v !== g.id)
-                      : [...prev.grades, g.id]
-                  }))} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
+                  <button key={g.id} onClick={() => toggleFilter('grades', g.id)} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
                     {g.name}
                   </button>
                 ))}
@@ -316,22 +323,33 @@ const CBCEcommerce = () => {
                 <option value="price_high">Price: High to Low</option>
               </select>
             </div>
-            <button onClick={() => setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' })} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">Clear Filters</button>
+            <button onClick={goToAll} className="w-full p-2 bg-gray-100 rounded-lg text-sm font-medium">Clear Filters</button>
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          {filteredProducts.slice(0, 60).map((product, i) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              ref={i === filteredProducts.length - 1 ? lastProductRef : null}
-            />
+          {products.map((product, i) => (
+            <ProductCard key={product.id} product={product} isLast={i === products.length - 1} />
           ))}
         </div>
 
-        {loading && <div className="text-center py-12">Loading products...</div>}
-        {filteredProducts.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
+        {loading && products.length === 0 && (
+          <div className="grid grid-cols-2 gap-3">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="bg-gray-200 rounded-2xl animate-pulse">
+                <div className="aspect-[3/4]" />
+                <div className="p-3 space-y-2">
+                  <div className="h-4 bg-gray-300 rounded w-20" />
+                  <div className="h-6 bg-gray-300 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {loadingMore && <div className="text-center py-4">Loading more...</div>}
+        {!hasMore && products.length > 0 && <div className="text-center py-4 text-gray-500">No more products</div>}
+        {products.length === 0 && !loading && <div className="text-center py-12 text-gray-500">No products found</div>}
       </div>
     </div>
   );
@@ -343,13 +361,13 @@ const CBCEcommerce = () => {
           <img src={selectedProduct.image} alt={selectedProduct.title} className="w-full h-96 object-cover" />
           <div className="p-6">
             <h1 className="text-2xl font-bold mb-2">{selectedProduct.title}</h1>
-            <p className="text-gray-600 mb-4">{selectedProduct.description || 'No description available'}</p>
+            <p className="text-gray-600 mb-4">{selectedProduct.description || 'High-quality CBC textbook'}</p>
             <div className="flex items-center gap-4 text-sm text-gray-500 mb-6">
               <span>{grades.find(g => g.id === selectedProduct.grade_id)?.name}</span>
               <span>•</span>
               <span>{subjects.find(s => s.id === selectedProduct.subject_id)?.name}</span>
               <span>•</span>
-              <span>In stock: {selectedProduct.stock}</span>
+              <span>Stock: {selectedProduct.stock}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-3xl font-bold text-blue-600">KSh {selectedProduct.price}</span>
@@ -432,7 +450,7 @@ const CBCEcommerce = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {loading ? (
+      {loading && products.length === 0 ? (
         <div className="flex items-center justify-center h-screen text-xl">Loading...</div>
       ) : (
         <>
@@ -441,15 +459,15 @@ const CBCEcommerce = () => {
             <>
               {currentPage === 'home' && <HomePage />}
               {currentPage === 'products' && <ProductsPage />}
-              {currentPage === 'details' && <DetailsPage />}
+              {currentPage === 'details' && selectedProduct && <DetailsPage />}
               {currentPage === 'checkout' && <CheckoutPage />}
             </>
           )}
           {showCart && <CartModal />}
           {!showCart && cartCount > 0 && currentPage !== 'checkout' && (
-            <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-600 text-white p-4 rounded-full shadow-2xl z-30">
-              <ShoppingCart size={28} />
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
+            <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30">
+              <ShoppingCart size={24} />
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                 {cartCount}
               </span>
             </button>
