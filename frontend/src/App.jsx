@@ -39,74 +39,103 @@ const CBCEcommerce = () => {
 
   const page = useRef(1);
   const observer = useRef();
+  const prevFiltersRef = useRef(filters);
+  const prevSearchRef = useRef(searchQuery);
 
+  // Load grades, subjects, categories
   useEffect(() => {
     const fetchStaticData = async () => {
       try {
-        const [g, s, c] = await Promise.all([
-          fetch(`${API_URL}/api/grades`).then(r => r.json()),
-          fetch(`${API_URL}/api/subjects`).then(r => r.json()),
-          fetch(`${API_URL}/api/categories`).then(r => r.json())
+        const [gRes, sRes, cRes] = await Promise.all([
+          fetch(`${API_URL}/api/grades`),
+          fetch(`${API_URL}/api/subjects`),
+          fetch(`${API_URL}/api/categories`)
         ]);
+
+        const [g, s, c] = await Promise.all([
+          gRes.json(),
+          sRes.json(),
+          cRes.json()
+        ]);
+
         setGrades(g || []);
         setSubjects(s || []);
         setCategories(c || []);
       } catch (err) {
-        alert('Failed to load data. Check internet.');
+        console.error(err);
+        alert('Failed to load grades/subjects. Check your connection.');
       }
     };
     fetchStaticData();
   }, []);
 
+  // Stable fetchProducts
   const fetchProducts = useCallback(async (reset = false) => {
     if (reset) {
       page.current = 1;
       setProducts([]);
       setHasMore(true);
+      prevFiltersRef.current = filters;
+      prevSearchRef.current = searchQuery;
     }
+
     if (!hasMore && !reset) return;
+
+    // Avoid duplicate requests
+    const filtersSame = JSON.stringify(filters) === JSON.stringify(prevFiltersRef.current);
+    const searchSame = searchQuery === prevSearchRef.current;
+    if (!reset && filtersSame && searchSame && page.current > 1) return;
 
     try {
       setLoadingMore(!reset);
+      if (reset) setLoading(true);
+
       const params = new URLSearchParams();
-      if (filters.grades.length) params.append('grade_ids', filters.grades.join(','));
-      if (filters.subjects.length) params.append('subject_ids', filters.subjects.join(','));
-      if (filters.categories.length) params.append('category_ids', filters.categories.join(','));
-      if (searchQuery) params.append('search', searchQuery);
+      if (filters.grades.length > 0) params.append('grade_ids', filters.grades.join(','));
+      if (filters.subjects.length > 0) params.append('subject_ids', filters.subjects.join(','));
+      if (filters.categories.length > 0) params.append('category_ids', filters.categories.join(','));
+      if (searchQuery.trim()) params.append('search', searchQuery.trim());
       if (filters.sortBy !== 'recent') params.append('sort', filters.sortBy);
       params.append('page', page.current);
       params.append('limit', 20);
 
       const res = await fetch(`${API_URL}/api/products?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch products');
+
       const newProducts = await res.json();
 
       setProducts(prev => reset ? newProducts : [...prev, ...newProducts]);
       setHasMore(newProducts.length === 20);
-      page.current += 1;
+      if (newProducts.length === 20) page.current += 1;
     } catch (err) {
       console.error(err);
+      if (reset) alert('Failed to load products');
     } finally {
       setLoadingMore(false);
       setLoading(false);
     }
   }, [filters, searchQuery, hasMore]);
 
+  // Trigger fetch on page/filter/search change
   useEffect(() => {
-    if (currentPage === 'products' || currentPage === 'home') {
-      fetchProducts(currentPage === 'products');
+    if (currentPage === 'home' || currentPage === 'products') {
+      fetchProducts(true);
     }
   }, [currentPage, filters, searchQuery, fetchProducts]);
 
+  // Infinite scroll observer
   const lastProductRef = useCallback(node => {
-    if (loadingMore) return;
+    if (loading || loadingMore) return;
     if (observer.current) observer.current.disconnect();
+
     observer.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && hasMore) {
         fetchProducts();
       }
     });
+
     if (node) observer.current.observe(node);
-  }, [loadingMore, hasMore, fetchProducts]);
+  }, [loading, loadingMore, hasMore, fetchProducts]);
 
   const cartTotal = cart.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
@@ -114,7 +143,9 @@ const CBCEcommerce = () => {
   const addToCart = (product) => {
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id);
-      if (existing) return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
       return [...prev, { ...product, quantity: 1 }];
     });
   };
@@ -127,7 +158,10 @@ const CBCEcommerce = () => {
   };
 
   const handleCheckout = async () => {
-    if (!checkoutData.name || !checkoutData.phone) return alert('Please fill name and phone');
+    if (!checkoutData.name || !checkoutData.phone) {
+      return alert('Please fill in your name and phone number');
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/checkout/mpesa`, {
         method: 'POST',
@@ -141,17 +175,18 @@ const CBCEcommerce = () => {
           delivery_option: checkoutData.deliveryOption
         })
       });
+
       const data = await res.json();
       if (data.success) {
-        alert('STK Push sent! Check your phone.');
-        setOrderSuccess(true);
+        alert('STK Push sent! Check your phone to complete payment.');
         setCart([]);
+        setOrderSuccess(true);
         setCurrentPage('home');
       } else {
-        alert('Payment failed: ' + (data.error || 'Try again'));
+        alert('Payment failed: ' + (data.error || 'Please try again'));
       }
-    } catch {
-      alert('Network error');
+    } catch (err) {
+      alert('Network error. Please check your connection.');
     }
   };
 
@@ -223,16 +258,28 @@ const CBCEcommerce = () => {
     const subjectName = subjects.find(s => s.id === product.subject_id)?.name || '';
 
     return (
-      <div ref={isLast ? lastProductRef : null} onClick={() => fetchProduct(product.id)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
+      <div
+        ref={isLast ? lastProductRef : null}
+        onClick={() => fetchProduct(product.id)}
+        className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+      >
         <div className="aspect-[3/4] bg-gray-100">
-          <img src={product.image || "https://via.placeholder.com/300"} alt={product.title} className="w-full h-full object-cover" loading="lazy" />
+          <img
+            src={product.image || "https://via.placeholder.com/300"}
+            alt={product.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
         </div>
         <div className="p-3">
           <div className="text-xs text-gray-500 mb-1">{gradeName} • {subjectName}</div>
           <h3 className="font-semibold text-sm mb-2 line-clamp-2">{product.title}</h3>
           <div className="flex justify-between items-center">
             <span className="text-lg font-bold text-blue-600">KSh {product.price}</span>
-            <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+            <button
+              onClick={(e) => { e.stopPropagation(); addToCart(product); }}
+              className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+            >
               <Plus size={16} />
             </button>
           </div>
@@ -253,6 +300,7 @@ const CBCEcommerce = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:outline-none"
+              autoComplete="off"
             />
           </div>
         </div>
@@ -261,7 +309,11 @@ const CBCEcommerce = () => {
           <h2 className="text-lg font-bold mb-4">Browse by Grade</h2>
           <div className="grid grid-cols-2 gap-3">
             {grades.map(grade => (
-              <button key={grade.id} onClick={() => goToGrade(grade.id)} className="p-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl shadow-md hover:shadow-lg transition-all">
+              <button
+                key={grade.id}
+                onClick={() => goToGrade(grade.id)}
+                className="p-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl shadow-md hover:shadow-lg transition-all"
+              >
                 <div className="font-bold text-lg">{grade.name}</div>
                 <div className="text-sm opacity-90">View Books</div>
               </button>
@@ -295,7 +347,10 @@ const CBCEcommerce = () => {
   const ProductsPage = () => (
     <div className="pb-20">
       <div className="max-w-7xl mx-auto px-4 py-4">
-        <button onClick={() => setShowFilters(!showFilters)} className="w-full mb-4 p-3 bg-white border-2 border-gray-200 rounded-2xl flex items-center justify-between">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="w-full mb-4 p-3 bg-white border-2 border-gray-200 rounded-2xl flex items-center justify-between"
+        >
           <div className="flex items-center gap-2"><Filter size={20} /><span className="font-medium">Filters</span></div>
           {showFilters ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
         </button>
@@ -306,7 +361,11 @@ const CBCEcommerce = () => {
               <h3 className="font-semibold mb-2">Grade</h3>
               <div className="flex flex-wrap gap-2">
                 {grades.map(g => (
-                  <button key={g.id} onClick={() => toggleFilter('grades', g.id)} className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  <button
+                    key={g.id}
+                    onClick={() => toggleFilter('grades', g.id)}
+                    className={`px-3 py-1 rounded-full text-sm ${filters.grades.includes(g.id) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700'}`}
+                  >
                     {g.name}
                   </button>
                 ))}
@@ -314,7 +373,11 @@ const CBCEcommerce = () => {
             </div>
             <div>
               <h3 className="font-semibold mb-2">Sort By</h3>
-              <select value={filters.sortBy} onChange={e => setFilters(prev => ({ ...prev, sortBy: e.target.value }))} className="w-full p-2 border rounded-lg">
+              <select
+                value={filters.sortBy}
+                onChange={e => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
+                className="w-full p-2 border rounded-lg"
+              >
                 <option value="recent">Recently Added</option>
                 <option value="price_low">Price: Low to High</option>
                 <option value="price_high">Price: High to Low</option>
@@ -386,7 +449,10 @@ const CBCEcommerce = () => {
               <h2 className="font-semibold mb-2">Description</h2>
               <p className="text-gray-600 text-sm">{selectedProduct.description || 'No description available.'}</p>
             </div>
-            <button onClick={() => { addToCart(selectedProduct); setShowCart(true); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
+            <button
+              onClick={() => { addToCart(selectedProduct); setShowCart(true); }}
+              className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600"
+            >
               Add to Cart
             </button>
           </div>
@@ -429,7 +495,10 @@ const CBCEcommerce = () => {
                 <span>Total</span>
                 <span className="text-blue-600">KSh {cartTotal}</span>
               </div>
-              <button onClick={() => { setShowCart(false); setCurrentPage('checkout'); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
+              <button
+                onClick={() => { setShowCart(false); setCurrentPage('checkout'); }}
+                className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600"
+              >
                 Checkout with M-Pesa
               </button>
             </div>
@@ -456,15 +525,38 @@ const CBCEcommerce = () => {
         </div>
       </div>
       <div className="bg-white rounded-2xl shadow-md p-4 mb-4 space-y-4">
-        <input placeholder="Full Name *" value={checkoutData.name} onChange={e => setCheckoutData({ ...checkoutData, name: e.target.value })} className="w-full p-3 border rounded-xl" />
-        <input placeholder="Phone Number (M-Pesa) *" value={checkoutData.phone} onChange={e => setCheckoutData({ ...checkoutData, phone: e.target.value })} className="w-full p-3 border rounded-xl" />
-        <input placeholder="Location (for delivery)" value={checkoutData.location} onChange={e => setCheckoutData({ ...checkoutData, location: e.target.value })} className="w-full p-3 border rounded-xl" />
-        <select value={checkoutData.deliveryOption} onChange={e => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value })} className="w-full p-3 border rounded-xl">
+        <input
+          placeholder="Full Name *"
+          value={checkoutData.name}
+          onChange={e => setCheckoutData({ ...checkoutData, name: e.target.value })}
+          className="w-full p-3 border rounded-xl focus:outline-none focus:border-blue-500"
+        />
+        <input
+          placeholder="Phone Number (M-Pesa) *"
+          value={checkoutData.phone}
+          onChange={e => setCheckoutData({ ...checkoutData, phone: e.target.value })}
+          className="w-full p-3 border rounded-xl focus:outline-none focus:border-blue-500"
+          inputMode="numeric"
+        />
+        <input
+          placeholder="Location (for delivery)"
+          value={checkoutData.location}
+          onChange={e => setCheckoutData({ ...checkoutData, location: e.target.value })}
+          className="w-full p-3 border rounded-xl focus:outline-none focus:border-blue-500"
+        />
+        <select
+          value={checkoutData.deliveryOption}
+          onChange={e => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value })}
+          className="w-full p-3 border rounded-xl focus:outline-none"
+        >
           <option value="pickup">Pickup (Free)</option>
           <option value="delivery">Home Delivery (+KSh 200)</option>
         </select>
       </div>
-      <button onClick={handleCheckout} className="w-full p-4 bg-green-600 text-white rounded-2xl font-semibold hover:bg-green-700 flex items-center justify-center gap-2">
+      <button
+        onClick={handleCheckout}
+        className="w-full p-4 bg-green-600 text-white rounded-2xl font-semibold hover:bg-green-700 flex items-center justify-center gap-2"
+      >
         Complete Payment (KSh {cartTotal + (checkoutData.deliveryOption === 'delivery' ? 200 : 0)})
       </button>
     </div>
@@ -477,7 +569,14 @@ const CBCEcommerce = () => {
       </div>
       <h2 className="text-2xl font-bold mb-2">Order Successful!</h2>
       <p className="text-gray-600 mb-8">STK Push sent to your phone</p>
-      <button onClick={() => { setOrderSuccess(false); setCheckoutData({ name: '', phone: '', location: '', deliveryOption: 'pickup' }); setCurrentPage('home'); }} className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600">
+      <button
+        onClick={() => {
+          setOrderSuccess(false);
+          setCheckoutData({ name: '', phone: '', location: '', deliveryOption: 'pickup' });
+          setCurrentPage('home');
+        }}
+        className="w-full p-4 bg-blue-500 text-white rounded-2xl font-semibold hover:bg-blue-600"
+      >
         Continue Shopping
       </button>
     </div>
@@ -500,7 +599,10 @@ const CBCEcommerce = () => {
           )}
           <CartModal />
           {!showCart && cartCount > 0 && currentPage !== 'checkout' && (
-            <button onClick={() => setShowCart(true)} className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30">
+            <button
+              onClick={() => setShowCart(true)}
+              className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg z-30 hover:scale-110 transition"
+            >
               <ShoppingCart size={24} />
               <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                 {cartCount}
