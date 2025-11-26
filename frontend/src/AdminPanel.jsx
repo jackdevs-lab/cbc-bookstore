@@ -1,7 +1,7 @@
 // frontend/src/AdminPanel.jsx
 import { useState } from 'react';
 
-const API_URL = 'http://localhost:5000';
+const API_URL = 'https://cbc-books-backend.onrender.com';
 const ADMIN_PASSWORD = 'Veronica2024!'; // Match .env
 
 export default function AdminPanel() {
