@@ -78,53 +78,84 @@ app.get('/api/products/:id', async (req, res) => {
 app.get('/api/products', async (req, res) => {
   try {
     const {
-      grade_ids, subject_ids, category_ids,
-      min_price, max_price, sort = 'recent',
-      search, page = 1, limit = 20
+      grade_ids,
+      subject_ids,
+      category_ids,
+      search,
+      sort = 'recent',
+      page = 1,
+      limit = 20
     } = req.query;
 
-    let query = `
+    const offset = (Number(page) - 1) * Number(limit);
+
+    // Build WHERE conditions safely (no dynamic param count)
+    let where = [];
+    let params = [];
+
+    if (grade_ids) {
+      const ids = grade_ids.split(',').map(Number).filter(Boolean);
+      if (ids.length > 0) {
+        where.push(`p.grade_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
+        params.push(...ids);
+      }
+    }
+    if (subject_ids) {
+      const ids = subject_ids.split(',').map(Number).filter(Boolean);
+      if (ids.length > 0) {
+        where.push(`p.subject_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
+        params.push(...ids);
+      }
+    }
+    if (category_ids) {
+      const ids = category_ids.split(',').map(Number).filter(Boolean);
+      if (ids.length > 0) {
+        where.push(`p.category_id IN (${ids.map((_, i) => `$${params.length + i + 1}`).join(',')})`);
+        params.push(...ids);
+      }
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(`(p.title ILIKE $${params.length} OR p.isbn ILIKE $${params.length} OR p.publisher ILIKE $${params.length})`);
+    }
+
+    const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
+
+    // Sort
+    let orderBy = 'ORDER BY p.id DESC';
+    if (sort === 'price_low') orderBy = 'ORDER BY p.price ASC';
+    if (sort === 'price_high') orderBy = 'ORDER BY p.price DESC';
+
+    // Final query — fixed param order
+    const finalQuery = `
       SELECT p.*, g.name as grade_name, s.name as subject_name, c.name as category_name
       FROM products p
       LEFT JOIN grades g ON p.grade_id = g.id
       LEFT JOIN subjects s ON p.subject_id = s.id
       LEFT JOIN categories c ON p.category_id = c.id
-      WHERE 1=1
+      ${whereClause}
+      ${orderBy}
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
-    const params = [];
 
-    if (grade_ids)  { query += ` AND p.grade_id = ANY($${params.length + 1})`;   params.push(grade_ids.split(',').map(Number)); }
-    if (subject_ids){ query += ` AND p.subject_id = ANY($${params.length + 1})`; params.push(subject_ids.split(',').map(Number)); }
-    if (category_ids){ query += ` AND p.category_id = ANY($${params.length + 1})`; params.push(category_ids.split(',').map(Number)); }
-    if (min_price)  { query += ` AND p.price >= $${params.length + 1}`;          params.push(Number(min_price)); }
-    if (max_price)  { query += ` AND p.price <= $${params.length + 1}`;          params.push(Number(max_price)); }
-    if (search)     { query += ` AND (p.title ILIKE $${params.length + 1} OR p.isbn ILIKE $${params.length + 1} OR p.publisher ILIKE $${params.length + 1})`; 
-                      params.push(`%${search}%`); }
+    params.push(Number(limit), offset);
 
-    if (sort === 'price_low')      query += ' ORDER BY p.price ASC';
-    else if (sort === 'price_high') query += ' ORDER BY p.price DESC';
-    else                            query += ' ORDER BY p.id DESC';
+    const result = await sql(finalQuery, ...params);
 
-    query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(Number(limit), (Number(page) - 1) * Number(limit));
-
-    const result = await sql([query, ...params]);
-
-    // THIS IS THE MAGIC → Cloudinary delivers tiny, fast, auto-optimized images
+    // Cloudinary thumbnails — instant loading
     const products = result.map(row => ({
       ...row,
       image: row.image
-        ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${row.image.split('/').pop()}`
+        ? `https://res.cloudinary.com/dbxb5wlnf/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${row.image.split('/').pop()}`
         : 'https://via.placeholder.com/400x600.png?text=No+Image'
     }));
 
     res.json(products);
   } catch (error) {
-    console.error('Products error:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Products error:', error.message);
+    res.json([]); // Never crash frontend
   }
 });
-
 app.put('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
