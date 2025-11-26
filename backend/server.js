@@ -16,7 +16,7 @@ const pool = new Pool({
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://www.cbcbookstore.co.ke',
+  origin: process.env.FRONTEND_URL || 'http://127.0.0.1:5500/',
   credentials: true
 }));
 app.use(express.json());
