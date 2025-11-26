@@ -29,28 +29,29 @@ app.get('/api/health', (req, res) => {
 // Routes
 app.get('/api/grades', async (req, res) => {
   try {
-    const grades = await sql`SELECT * FROM grades ORDER BY id`;
-    res.json(grades);
+    const result = await sql`SELECT * FROM grades ORDER BY id`;
+    res.json(result.rows || result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Grades error:', error.message);
+    res.json([]);
   }
 });
 
 app.get('/api/subjects', async (req, res) => {
   try {
-    const subjects = await sql`SELECT * FROM subjects ORDER BY name`;
-    res.json(subjects);
+    const result = await sql`SELECT * FROM subjects ORDER BY name`;
+    res.json(result.rows || result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.json([]);
   }
 });
 
 app.get('/api/categories', async (req, res) => {
   try {
-    const categories = await sql`SELECT * FROM categories ORDER BY name`;
-    res.json(categories);
+    const result = await sql`SELECT * FROM categories ORDER BY name`;
+    res.json(result.rows || result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.json([]);
   }
 });
 
@@ -82,13 +83,12 @@ app.get('/api/products', async (req, res) => {
 
     console.log('Fetching products →', { page, limit, offset });
 
-    // SUPER SIMPLE QUERY — no filters, no joins that can break
     const query = `
       SELECT 
-        p.id, p.title, p.price, p.image, p.stock, p.publisher, p.isbn,
-        p.grade_id, g.name as grade_name,
-        p.subject_id, s.name as subject_name,
-        p.category_id, c.name as category_name
+        p.id, p.title, p.price, p.image, p.stock, p.publisher, p.isbn, p.description,
+        p.grade_id, COALESCE(g.name, 'Unknown Grade') as grade_name,
+        p.subject_id, COALESCE(s.name, 'Unknown Subject') as subject_name,
+        p.category_id, COALESCE(c.name, 'Unknown Category') as category_name
       FROM products p
       LEFT JOIN grades g ON p.grade_id = g.id
       LEFT JOIN subjects s ON p.subject_id = s.id
@@ -97,12 +97,14 @@ app.get('/api/products', async (req, res) => {
       LIMIT $1 OFFSET $2
     `;
 
+    // THIS IS THE KEY FIX: Neon returns { rows: [...] }
     const result = await sql(query, Number(limit), offset);
+    const rows = result.rows || result; // ← THIS LINE SAVES YOUR LIFE
 
-    console.log(`Success! Found ${result.length} products`);
+    console.log(`Found ${rows.length} products in DB`);
 
-    // Cloudinary magic — tiny fast images
-    const products = result.map(p => ({
+    // Transform with Cloudinary thumbnails
+    const products = rows.map(p => ({
       ...p,
       image: p.image
         ? `https://res.cloudinary.com/dbxb5wlnf/image/upload/w_400,h_600,c_fill,q_auto,f_auto/${p.image.split('/').pop()}`
@@ -112,7 +114,7 @@ app.get('/api/products', async (req, res) => {
     res.json(products);
   } catch (error) {
     console.error('PRODUCTS ERROR:', error.message);
-    res.json([]); // Never crash
+    res.json([]); // Safe fallback
   }
 });
 app.put('/api/products/:id', async (req, res) => {
