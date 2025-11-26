@@ -72,9 +72,22 @@ app.get('/api/products/:id', async (req, res) => {
   }
 });
 
+// REMOVE pg.Pool completely
+// const pool = new Pool(...);  → DELETE THIS
+
 app.get('/api/products', async (req, res) => {
   try {
-    const { grade_ids, subject_ids, category_ids, min_price, max_price, sort, search } = req.query;
+    const {
+      grade_ids,
+      subject_ids,
+      category_ids,
+      min_price,
+      max_price,
+      sort = 'recent',
+      search,
+      page = 1,
+      limit = 20
+    } = req.query;
 
     let query = `
       SELECT p.*, g.name as grade_name, s.name as subject_name, c.name as category_name
@@ -84,33 +97,48 @@ app.get('/api/products', async (req, res) => {
       LEFT JOIN categories c ON p.category_id = c.id
       WHERE 1=1
     `;
-    const values = [];
+    const params = [];
 
     if (grade_ids) {
-      const ids = grade_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length) { query += ` AND p.grade_id = ANY($${values.length + 1})`; values.push(ids); }
+      const ids = grade_ids.split(',').map(Number);
+      query += ` AND p.grade_id = ANY($${params.length + 1})`;
+      params.push(ids);
     }
     if (subject_ids) {
-      const ids = subject_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length) { query += ` AND p.subject_id = ANY($${values.length + 1})`; values.push(ids); }
+      const ids = subject_ids.split(',').map(Number);
+      query += ` AND p.subject_id = ANY($${params.length + 1})`;
+      params.push(ids);
     }
     if (category_ids) {
-      const ids = category_ids.split(',').map(Number).filter(Boolean);
-      if (ids.length) { query += ` AND p.category_id = ANY($${values.length + 1})`; values.push(ids); }
+      const ids = category_ids.split(',').map(Number);
+      query += ` AND p.category_id = ANY($${params.length + 1})`;
+      params.push(ids);
     }
-    if (min_price) { query += ` AND p.price >= $${values.length + 1}`; values.push(Number(min_price)); }
-    if (max_price) { query += ` AND p.price <= $${values.length + 1}`; values.push(Number(max_price)); }
-    if (search) { query += ` AND (p.title ILIKE $${values.length + 1} OR p.description ILIKE $${values.length + 1})`; values.push(`%${search}%`); }
+    if (min_price) {
+      query += ` AND p.price >= $${params.length + 1}`;
+      params.push(Number(min_price));
+    }
+    if (max_price) {
+      query += ` AND p.price <= $${params.length + 1}`;
+      params.push(Number(max_price));
+    }
+    if (search) {
+      query += ` AND (p.title ILIKE $${params.length + 1} OR p.isbn ILIKE $${params.length + 1} OR p.publisher ILIKE $${params.length + 1})`;
+      params.push(`%${search}%`);
+    }
 
     if (sort === 'price_low') query += ' ORDER BY p.price ASC';
     else if (sort === 'price_high') query += ' ORDER BY p.price DESC';
     else query += ' ORDER BY p.id DESC';
 
-    const result = await pool.query(query, values);
-    res.json(result.rows);
+    query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(Number(limit), (Number(page) - 1) * Number(limit));
+
+    const result = await sql([query, ...params]); // Neon supports this syntax
+    res.json(result);
   } catch (error) {
-    console.error('Error in /api/products:', error);
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
