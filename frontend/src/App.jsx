@@ -22,7 +22,8 @@ const CBCEcommerce = () => {
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(''); // actual query used for fetching
+  const [searchInput, setSearchInput] = useState(''); // immediate input shown to user
   const [showFilters, setShowFilters] = useState(false);
 
   const [filters, setFilters] = useState({
@@ -41,6 +42,7 @@ const CBCEcommerce = () => {
   const observer = useRef();
   const prevFiltersRef = useRef(filters);
   const prevSearchRef = useRef(searchQuery);
+  const debounceRef = useRef(null);
 
   // Load grades, subjects, categories
   useEffect(() => {
@@ -52,15 +54,20 @@ const CBCEcommerce = () => {
           fetch(`${API_URL}/api/categories`)
         ]);
 
-        const [g, s, c] = await Promise.all([
+        let [g, s, c] = await Promise.all([
           gRes.json(),
           sRes.json(),
           cRes.json()
         ]);
 
-        setGrades(g || []);
-        setSubjects(s || []);
-        setCategories(c || []);
+        // Normalize IDs to numbers to avoid includes() mismatches
+        g = (g || []).map(x => ({ ...x, id: Number(x.id) }));
+        s = (s || []).map(x => ({ ...x, id: Number(x.id) }));
+        c = (c || []).map(x => ({ ...x, id: Number(x.id) }));
+
+        setGrades(g);
+        setSubjects(s);
+        setCategories(c);
       } catch (err) {
         console.error(err);
         alert('Failed to load grades/subjects. Check your connection.');
@@ -80,11 +87,6 @@ const CBCEcommerce = () => {
     }
 
     if (!hasMore && !reset) return;
-
-    // Avoid duplicate requests
-    const filtersSame = JSON.stringify(filters) === JSON.stringify(prevFiltersRef.current);
-    const searchSame = searchQuery === prevSearchRef.current;
-    if (!reset && filtersSame && searchSame && page.current > 1) return;
 
     try {
       setLoadingMore(!reset);
@@ -167,7 +169,7 @@ const CBCEcommerce = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: checkoutData.phone.replace(/\D/g, ''),
+          phone: checkoutData.phone.replace(/\\D/g, ''),
           amount: cartTotal + (checkoutData.deliveryOption === 'delivery' ? 200 : 0),
           items: cart.map(i => ({ product_id: i.id, quantity: i.quantity, price: i.price })),
           customer_name: checkoutData.name,
@@ -190,12 +192,23 @@ const CBCEcommerce = () => {
     }
   };
 
+  // Debounced search: keep immediate input in searchInput, only set searchQuery after debounce
+  const handleSearch = value => {
+    setSearchInput(value);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(value);
+    }, 300);
+  };
+
   const toggleFilter = (type, value) => {
+    // normalize to number to match loaded static data IDs
+    const v = Number(value);
     setFilters(prev => ({
       ...prev,
-      [type]: prev[type].includes(value)
-        ? prev[type].filter(v => v !== value)
-        : [...prev[type], value]
+      [type]: prev[type].includes(v)
+        ? prev[type].filter(x => x !== v)
+        : [...prev[type], v]
     }));
   };
 
@@ -214,18 +227,23 @@ const CBCEcommerce = () => {
 
   const goToAllProducts = () => {
     setFilters({ grades: [], subjects: [], categories: [], sortBy: 'recent' });
+    setSearchInput('');
     setSearchQuery('');
     setCurrentPage('products');
   };
 
   const goToGrade = (gradeId) => {
-    setFilters({ grades: [gradeId], subjects: [], categories: [], sortBy: 'recent' });
+    const id = Number(gradeId);
+    setFilters({ grades: [id], subjects: [], categories: [], sortBy: 'recent' });
+    setSearchInput('');
     setSearchQuery('');
     setCurrentPage('products');
   };
 
   const goToCategory = (categoryId) => {
-    setFilters({ grades: [], subjects: [], categories: [categoryId], sortBy: 'recent' });
+    const id = Number(categoryId);
+    setFilters({ grades: [], subjects: [], categories: [id], sortBy: 'recent' });
+    setSearchInput('');
     setSearchQuery('');
     setCurrentPage('products');
   };
@@ -297,8 +315,8 @@ const CBCEcommerce = () => {
             <input
               type="text"
               placeholder="Search books, ISBN, publisher..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => handleSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:outline-none"
               autoComplete="off"
             />
