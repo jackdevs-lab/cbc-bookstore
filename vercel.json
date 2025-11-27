@@ -1,0 +1,7 @@
+{
+  "framework": null,
+  "builds": [
+    { "src": "frontend/index.html", "use": "@vercel/static" }
+  ],
+  "outputDirectory": "frontend"
+}
